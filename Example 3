@@ -1,0 +1,339 @@
+
+/**********************************************************************************
+    TABLE CREATION SCRIPT
+	
+	Description:
+       This deployment script is meant to be executed in its entirety using SSMS, in 
+	   the exact order provided.  Alternatively, the table blocks can be run individually
+	   in a pinch but you might run into errors.
+
+	   It creates the following tables:
+		   car_models
+		   car_makes
+		   customers
+		   addresses
+		   purchases
+
+	   If tables already exist, they will be dropped first. 
+
+**********************************************************************************/
+
+---------------------------- 
+-- DROP FOREIGN KEYS
+----------------------------
+
+DECLARE @drop   NVARCHAR(MAX) = N''
+
+SELECT @drop += N'
+ALTER TABLE ' + QUOTENAME(cs.name) + '.' + QUOTENAME(ct.name) 
+    + ' DROP CONSTRAINT ' + QUOTENAME(fk.name) + ';'
+FROM sys.foreign_keys AS fk
+INNER JOIN sys.tables AS ct
+  ON fk.parent_object_id = ct.[object_id]
+INNER JOIN sys.schemas AS cs 
+  ON ct.[schema_id] = cs.[schema_id];
+
+PRINT @drop;
+EXEC sp_executesql @drop
+
+
+---------------------------- 
+-- DROP TABLES 
+----------------------------
+
+--car_models
+IF EXISTS (SELECT * FROM sys.objects 
+WHERE object_id = OBJECT_ID(N'[dbo].[car_models]') AND type in (N'U'))
+
+BEGIN
+PRINT 'Dropping car_models'
+DROP TABLE dbo.car_models
+END 
+
+--car_makes
+IF EXISTS (SELECT * FROM sys.objects 
+WHERE object_id = OBJECT_ID(N'[dbo].[car_makes]') AND type in (N'U'))
+
+BEGIN
+PRINT 'Dropping car_makes'
+DROP TABLE dbo.car_makes
+END 
+
+--customers
+IF EXISTS (SELECT * FROM sys.objects 
+WHERE object_id = OBJECT_ID(N'[dbo].[customers]') AND type in (N'U'))
+
+BEGIN
+PRINT 'Dropping customers'
+DROP TABLE dbo.customers
+END 
+
+--addresses
+IF EXISTS (SELECT * FROM sys.objects 
+WHERE object_id = OBJECT_ID(N'[dbo].[addresses]') AND type in (N'U'))
+
+BEGIN
+PRINT 'Dropping addresses'
+DROP TABLE dbo.addresses
+END 
+
+--purchases
+IF EXISTS (SELECT * FROM sys.objects 
+WHERE object_id = OBJECT_ID(N'[dbo].[purchases]') AND type in (N'U'))
+
+BEGIN
+PRINT 'Dropping purchases'
+DROP TABLE dbo.purchases
+END 
+
+
+---------------------------- 
+--CREATE TABLE car_models
+----------------------------
+
+IF NOT EXISTS (SELECT * FROM sys.objects 
+WHERE object_id = OBJECT_ID(N'[dbo].[car_models]') AND type in (N'U'))
+
+BEGIN
+CREATE TABLE dbo.car_models (
+	car_modelsId int IDENTITY (1,1) NOT NULL
+	, CONSTRAINT PK_car_models_Id PRIMARY KEY CLUSTERED (car_modelsId)
+	, Model varchar(255) NOT NULL 
+	, Deleted bit
+	);
+
+PRINT 'Created car_models'
+END
+
+
+---------------------------- 
+--CREATE TABLE car_makes
+----------------------------
+
+IF NOT EXISTS (SELECT * FROM sys.objects 
+WHERE object_id = OBJECT_ID(N'[dbo].[car_makes]') AND type in (N'U'))
+
+BEGIN
+
+CREATE TABLE dbo.car_makes (
+	car_makesId int IDENTITY (10,5) NOT NULL
+	, CONSTRAINT PK_car_makes_Id PRIMARY KEY CLUSTERED (car_makesId)
+	, FK_car_modelsId int FOREIGN KEY REFERENCES car_models(car_modelsId)
+	, Make varchar(255) NOT NULL 
+	, Deleted bit
+);
+
+PRINT 'Created car_makes'
+END
+
+
+
+
+
+---------------------------- 
+--CREATE TABLE addresses
+----------------------------
+IF NOT EXISTS (SELECT * FROM sys.objects 
+WHERE object_id = OBJECT_ID(N'[dbo].[addresses]') AND type in (N'U'))
+
+BEGIN
+
+CREATE TABLE dbo.addresses (
+	addressesId bigint IDENTITY (3000,1) NOT NULL
+	, CONSTRAINT PK_addresses_Id PRIMARY KEY CLUSTERED (addressesId)
+	, Street1 varchar (255)
+	, Street2 varchar (255)
+	, City varchar(255)
+	, State char(2) NOT NULL 
+	, Zip char(5) NOT NULL
+	, Homeowner bit
+	, Updated_at datetime2   
+	, Deleted_at datetime2 
+
+);
+
+PRINT 'Created addresses'
+END
+
+
+---------------------------- 
+--CREATE TABLE customers
+----------------------------
+IF NOT EXISTS (SELECT * FROM sys.objects 
+WHERE object_id = OBJECT_ID(N'[dbo].[customers]') AND type in (N'U'))
+
+BEGIN
+
+CREATE TABLE dbo.customers (
+	customersId bigint IDENTITY (2000,1) NOT NULL
+	, CONSTRAINT PK_users_Id PRIMARY KEY CLUSTERED (customersId)
+	, Customer_id varchar(8) NOT NULL UNIQUE 
+	, First_name varchar(255)
+	, Last_name varchar(255)
+	, Email varchar(255) NOT NULL
+	, FK_addressesId bigint FOREIGN KEY REFERENCES addresses(addressesId)
+	, Salary DECIMAL (12,4) 
+	, Created_at datetime2  NOT NULL 
+	, Updated_at datetime2
+	, Deleted_at datetime2
+
+);
+
+PRINT 'Created customers'
+END
+
+
+---------------------------- 
+--CREATE TABLE purchases
+----------------------------
+IF NOT EXISTS (SELECT * FROM sys.objects 
+WHERE object_id = OBJECT_ID(N'[dbo].[purchases]') AND type in (N'U'))
+
+BEGIN
+
+CREATE TABLE dbo.purchases (
+	purchasesId bigint IDENTITY (1000,1) NOT NULL
+	, CONSTRAINT PK_purchases_Id PRIMARY KEY CLUSTERED (purchasesId) 
+	, FK_Customer_id bigint FOREIGN KEY REFERENCES customers(customersId)
+	, FK_Car_make int FOREIGN KEY REFERENCES car_makes(car_makesId)
+	, FK_Car_model int FOREIGN KEY REFERENCES car_models(car_modelsId)
+	, Car_year smallint CHECK (Car_year >= 1884)
+	, VIN char(17)
+	, Price DECIMAL (12,4) 
+	, Warranty bit
+	, _State char(2)
+	, Purchase_date datetime2
+	, Created_at datetime2  NOT NULL 
+	, Updated_at datetime2
+	, Deleted_at datetime2
+
+);
+
+PRINT 'Created purchases'
+END 
+
+
+/**********************************************************************************
+    IMPORT DATA SCRIPT
+
+	Run TABLE CREATE SCRIPT prior to this script. 
+	
+	Description:
+       This script is meant to be executed using SSMS and will populate 
+	   all tables in HBB_DATA.
+
+	   It requires that cleaned raw data first be imported from csv 
+	   into two tempdb tables:  Car_Purchases and make_model
+ 
+
+**********************************************************************************/
+
+
+---------------------------- 
+--IMPORT DATA car model
+----------------------------
+BEGIN
+INSERT INTO [HBB_DATA].dbo.car_models(Model)
+SELECT DISTINCT(Model) FROM tempdb.dbo.make_model;
+
+PRINT 'Done importing into car_models'
+END
+
+---------------------------- 
+--IMPORT DATA car makes
+----------------------------
+BEGIN
+INSERT INTO [HBB_DATA].dbo.car_makes(Make, FK_car_modelsId)
+
+SELECT DISTINCT(tm.make), mi.car_modelsId 
+FROM tempdb.dbo.make_model tm
+JOIN [HBB_DATA].dbo.car_models mi ON tm.model = mi.Model;
+
+PRINT 'Done importing into car_makes'
+END
+
+
+---------------------------- 
+--IMPORT DATA customers
+----------------------------
+BEGIN
+INSERT INTO [HBB_DATA].dbo.customers(Customer_id, First_name, Last_name, Email, Salary, Created_at)
+SELECT cp.[customer id]
+  , SUBSTRING(cp.name, 1, CHARINDEX(' ', cp.name) - 1) AS First_name
+  , SUBSTRING(cp.name, CHARINDEX(' ', cp.name), LEN(cp.name)) AS Last_name 
+  , 'test@email.com' AS Email
+  , cp.[yearly salary]
+  , GETDATE()
+FROM tempdb.dbo.Car_Purchases cp;
+
+PRINT 'Done importing into customers'
+END
+
+
+
+---------------------------- 
+--IMPORT DATA purchases
+----------------------------
+BEGIN
+INSERT INTO [HBB_DATA].dbo.purchases(FK_Customer_id, FK_Car_make, FK_Car_model, Warranty, Purchase_date, Created_at)
+SELECT cs.customersId
+, cm.car_makesId
+, cm.FK_car_modelsId 
+, CASE 
+	WHEN cp.[purchased car warranty] = 'Y' THEN '1'
+	WHEN cp.[purchased car warranty] = 'N' THEN '0'
+	END
+, cp.date
+, GETDATE()
+FROM tempdb.dbo.Car_Purchases cp
+JOIN [HBB_DATA].dbo.car_makes cm ON cm.make = cp.make
+JOIN [HBB_DATA].dbo.customers cs ON cs.customer_id = cp.[customer id]
+
+PRINT 'Done importing into purchases'
+END
+
+
+/**********************************************************************************
+    CREATE VIEW - Chrysler Customer Interest based on Salary Range
+
+	Run TABLE CREATE SCRIPT prior to this script. 
+	Run IMPORT DATA SCRIPT prior to this script.
+	
+	Description:
+       This script will create a views for Marketing Analysts. 
+ 
+
+**********************************************************************************/
+
+---------------------------- 
+--show the count of varying Interest Levels (on the Salary_Ranges sheet) for all makes of Chrysler vehicles
+----------------------------
+
+CREATE VIEW vw_Advertising_Interest_CHRYSLER AS (
+
+SELECT c.customer_id 
+, c.First_name
+, c.Last_name
+, c.Email
+, 'Interest Level' = CASE 
+	WHEN c.salary <= 49999 THEN 'Not Interested' 
+	WHEN c.salary <= 74999 THEN 'Potential'
+	WHEN c.salary <= 9999 THEN 'Silver'
+	WHEN c.salary >= 10000 THEN 'Gold'
+	END 
+, cm.Model
+FROM dbo.customers c
+JOIN dbo.purchases p ON p.FK_Customer_id = c.customersId
+JOIN dbo.car_models cm ON cm.car_modelsId = p.FK_Car_model
+WHERE c.Deleted_at IS NULL 
+	AND cm.Model = 'Chrysler'
+);
+
+
+
+
+
+
+
+
+
