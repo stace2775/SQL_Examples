@@ -1,0 +1,255 @@
+/*
+Solutions assume SQL Server 2016 or higher
+*/
+
+
+
+
+/* 
+Using the issuer, category, and card tables, create a query that returns count of cards by issuer number and category.
+
+*/
+
+
+	WITH cteIssuer AS 
+(
+   SELECT
+      id,
+      name 
+   FROM
+      issuer 
+)
+,
+cteCategory AS 
+(
+   SELECT
+      id,
+      name 
+   FROM
+      category 
+)
+,
+cteCard AS 
+(
+   SELECT
+      issuer_id,
+      category_id,
+      COUNT(name) as card_count 
+   FROM
+      card 
+   GROUP BY
+      issuer_id,
+      category_id 
+)
+SELECT
+   i.name as issuer,
+   c.name as category,
+   COALESCE(cc.card_count, 0) as card_count 
+FROM
+   cteIssuer i 
+   CROSS JOIN
+      cteCategory c 
+   LEFT OUTER JOIN
+      cteCard cc 
+      ON cc.issuer_id = i.id 
+      AND cc.category_id = c.id 
+ORDER BY
+   Issuer,
+   category;
+
+
+
+
+
+
+/* 
+
+The “import” table has duplicates. Delete the duplicates. To reload the table EXECUTE [dbo].[usp_reload_import_table];
+
+*/
+
+--SELECT * FROM import ORDER BY transaction_id
+
+DELETE
+   D 
+FROM
+   (
+      SELECT
+         *,
+         ROW_NUMBER() OVER (
+      ORDER BY
+         product) as rownum,
+         RANK() OVER (
+      ORDER BY
+         product, transaction_id, revenue) rank 
+      FROM
+         import 
+   )
+   D 
+WHERE
+   rownum != rank;
+
+
+
+
+
+
+/* 
+
+The goal of this exercise is to understand the impact each page has on a visitor’s journey to purchase a product.
+This will be done by splitting the revenue from a purchased product across all the pages the visitor saw that product on.
+
+Here is how to split the revenue:
+	If the visitor only saw the product on one page, that page gets 100% of the revenue
+	If the visitor saw the product on two pages, each page gets 50% of the revenue
+	If the visitor saw the product on 3 or more pages…
+		The first page the visitor saw the product on should get 40% of the revenue
+		The last page the visitor saw the product on should get 40% of the revenue
+		All other pages the visitor saw the product on should get 20% of the revenue split among them.
+
+Example of revenue split:
+A visitor saw pages A, B, C, D, and E. The visitor ultimately purchased product 1234, generating $200 revenue. The visitor saw the purchased product on pages A, B, C, and E (not D). The share of revenue would be attributed to pages like this:
+A: 40%, $80
+B: 10%, $20
+C: 10%, $20
+D: 40%, $80
+
+These are the tables in the database to explore specifically for this exercise:
+product
+sale
+page
+page_view
+page_product
+
+*/
+
+WITH sales_views AS 
+(
+   SELECT
+      s.id as sale_id,
+      pv.customer_id,
+      s.product_id as product_id,
+      pt.name as product,
+      s.revenue as sale_revenue,
+      s.ordered_at,
+      pv.id as page_view_id,
+      p.name as page,
+      pv.page_viewed_at 		
+	  
+	  
+	  -- Note:  because we only have 5 total pages, it's relatively efficient to hard code these values here.  
+	  -- But if we were dealing with a greater or unknown number of total pages, 
+      -- I'd want to spend more time finding a dynamic way to handle these CASE statements.  
+,
+      (
+         CASE
+            WHEN
+               COUNT(p.name) OVER (PARTITION BY pv.customer_id, s.product_id) = 1 
+            THEN
+               1 
+            WHEN
+               COUNT(p.name) OVER (PARTITION BY pv.customer_id, s.product_id) < 3 
+            THEN
+               .5 
+            WHEN
+               COUNT(p.name) OVER (PARTITION BY pv.customer_id, s.product_id) >= 3 
+               AND ROW_NUMBER() OVER (PARTITION BY pv.customer_id, s.product_id 
+      ORDER BY
+         page_viewed_at) = 1 
+      THEN
+         .4 
+      WHEN
+         COUNT(p.name) OVER (PARTITION BY pv.customer_id, s.product_id) >= 3 
+         AND ROW_NUMBER() OVER (PARTITION BY pv.customer_id, s.product_id 
+      ORDER BY
+         page_viewed_at) = 2 
+      THEN
+         .4 
+      WHEN
+         COUNT(p.name) OVER (PARTITION BY pv.customer_id, s.product_id) = 3 
+         AND ROW_NUMBER() OVER (PARTITION BY pv.customer_id, s.product_id 
+      ORDER BY
+         page_viewed_at) = 3 
+      THEN
+         .2 
+      WHEN
+         COUNT(p.name) OVER (PARTITION BY pv.customer_id, s.product_id) = 4 
+         AND ROW_NUMBER() OVER (PARTITION BY pv.customer_id, s.product_id 
+      ORDER BY
+         page_viewed_at) = 3 
+      THEN
+         .1 
+      WHEN
+         COUNT(p.name) OVER (PARTITION BY pv.customer_id, s.product_id) = 4 
+         AND ROW_NUMBER() OVER (PARTITION BY pv.customer_id, s.product_id 
+      ORDER BY
+         page_viewed_at) = 4 
+      THEN
+         .1 
+      WHEN
+         COUNT(p.name) OVER (PARTITION BY pv.customer_id, s.product_id) = 5 
+         AND ROW_NUMBER() OVER (PARTITION BY pv.customer_id, s.product_id 
+      ORDER BY
+         page_viewed_at) = 3 
+      THEN
+         .06 
+      WHEN
+         COUNT(p.name) OVER (PARTITION BY pv.customer_id, s.product_id) = 5 
+         AND ROW_NUMBER() OVER (PARTITION BY pv.customer_id, s.product_id 
+      ORDER BY
+         page_viewed_at) = 4 
+      THEN
+         .06 
+      WHEN
+         COUNT(p.name) OVER (PARTITION BY pv.customer_id, s.product_id) = 5 
+         AND ROW_NUMBER() OVER (PARTITION BY pv.customer_id, s.product_id 
+      ORDER BY
+         page_viewed_at) = 5 
+      THEN
+         .06 
+      ELSE
+         0 
+         END
+      )
+      as attribute 
+   FROM
+      page_view pv 
+      JOIN
+         page p 
+         ON p.id = pv.page_id 
+      JOIN
+         sale s 
+         ON s.customer_id = pv.customer_id 
+      JOIN
+         product pt 
+         ON pt.id = s.product_id 
+   WHERE
+      s.product_id IN 
+      (
+         SELECT
+            product_id 
+         FROM
+            page_product pp 
+         WHERE
+            pp.page_id = pv.page_id
+      )
+)
+SELECT
+   sale_id,
+   customer_id,
+   product_id,
+   product,
+   sale_revenue,
+   ordered_at,
+   page_view_id,
+   page,
+   page_viewed_at,
+   CAST (attribute as DECIMAL(1, 1)) as attribution,
+   CAST (sale_revenue*attribute as DECIMAL(10, 3)) as attributed_revenue 
+FROM
+   sales_views 
+ORDER BY
+   customer_id;
+
+			
+			
